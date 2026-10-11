@@ -213,6 +213,15 @@ main { max-width: 1140px; margin: 0 auto; padding: 20px 16px; }
 .fpill.active { background: var(--amber-dim); border-color: var(--border-hi); color: var(--amber); }
 .fpill.wc-pill.active { background: rgba(255,215,0,0.12); border-color: rgba(255,215,0,0.3); color: var(--wc-gold); }
 .fpill.eng-pill.active { background: rgba(0,200,90,0.1); border-color: rgba(0,200,90,0.25); color: var(--green); }
+.league-select {
+  background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.07);
+  color: var(--text-muted); font-size: 0.7rem; font-weight: 500; font-family: 'Inter', sans-serif;
+  padding: 4px 10px; border-radius: 16px; cursor: pointer; outline: none;
+}
+.league-select.active { background: var(--amber-dim); border-color: var(--border-hi); color: var(--amber); }
+.league-select option { background: #111; color: #ddd; }
+.bs-scroll { overflow-x: auto; }
+.bs-sub td { opacity: 0.7; }
 
 /* ── MATCH GRID ── */
 .match-grid {
@@ -886,14 +895,24 @@ footer {
   <!-- STANDINGS -->
   <div class="tab-panel" id="tab-standings">
     <div class="filter-row" id="standFilters">
-      <button class="fpill active" onclick="loadStandings('Premier League',this)">🏴󠁧󠁢󠁥󠁮󠁧󠁿 Premier League</button>
-      <button class="fpill" onclick="loadStandings('UEFA Champions League',this)">⭐ Champions League</button>
-      <button class="fpill" onclick="loadStandings('La Liga',this)">🇪🇸 La Liga</button>
-      <button class="fpill" onclick="loadStandings('Bundesliga',this)">🇩🇪 Bundesliga</button>
-      <button class="fpill" onclick="loadStandings('Serie A',this)">🇮🇹 Serie A</button>
-      <button class="fpill" onclick="loadStandings('Ligue 1',this)">🇫🇷 Ligue 1</button>
+      <button class="fpill eng-pill active" onclick="loadStandings('Premier League',this)">Premier League</button>
+      <button class="fpill eng-pill" onclick="loadStandings('Championship',this)">Championship</button>
+      <button class="fpill eng-pill" onclick="loadStandings('League One',this)">League One</button>
+      <button class="fpill eng-pill" onclick="loadStandings('League Two',this)">League Two</button>
+      <button class="fpill eng-pill" onclick="loadStandings('National League',this)">National League</button>
+      <select class="league-select" id="foreignLeagueSelect" onchange="if(this.value){loadStandings(this.value,this)}">
+        <option value="">🌍 Other leagues…</option>
+        <option value="UEFA Champions League">⭐ Champions League</option>
+        <option value="UEFA Europa League">🟠 Europa League</option>
+        <option value="La Liga">🇪🇸 La Liga</option>
+        <option value="Bundesliga">🇩🇪 Bundesliga</option>
+        <option value="Serie A">🇮🇹 Serie A</option>
+        <option value="Ligue 1">🇫🇷 Ligue 1</option>
+        <option value="Scottish Premiership">🏴󠁧󠁢󠁳󠁣󠁴󠁿 Scottish Premiership</option>
+        <option value="Eredivisie">🇳🇱 Eredivisie</option>
+        <option value="Primeira Liga">🇵🇹 Primeira Liga</option>
+      </select>
       <button class="fpill" onclick="loadLastSeasonRecap(this)">📜 Last Season Recap</button>
-      <button class="fpill" onclick="loadSeasonCountdown(this)">⏱️ Season Countdown</button>
     </div>
     <div id="standingsContent">
       <div class="state-box"><div class="spinner"></div><h3>Loading standings…</h3></div>
@@ -943,7 +962,7 @@ footer {
         Tap any match card for full details including goals, cards, subs and statistics.
       </p>
       <div style="margin-top:10px;font-size:0.67rem;color:rgba(255,180,0,0.3);">
-        v1.0 · Highlightly PRO · Part of the Bazza Ecosystem · bazzameps.github.io
+        v1.1 · Highlightly PRO · Part of the Bazza Ecosystem · bazzameps.github.io
       </div>
     </div>
   </div>
@@ -965,7 +984,7 @@ footer {
   </div>
 </div>
 
-<footer>⚽ Bazza's Football Oracle v1.0 · Data via Highlightly · Part of the Bazza Ecosystem</footer>
+<footer>⚽ Bazza's Football Oracle v1.1 · Data via Highlightly · Part of the Bazza Ecosystem</footer>
 
 <script>
 // ── CONFIG ──
@@ -992,10 +1011,28 @@ window.addEventListener('load', async () => {
   loadStandings('Premier League', document.querySelector('#standFilters .fpill'));
 });
 
-function todayStr() { return new Date().toISOString().split('T')[0]; }
+function localYMD(d) {
+  return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+}
+function todayStr() { return localYMD(new Date()); }
 function dateStr(offset) {
   const d = new Date(); d.setDate(d.getDate() + offset);
-  return d.toISOString().split('T')[0];
+  return localYMD(d);
+}
+
+// Every match for one date, paginated. Busy Saturdays/Sundays exceed 100
+// fixtures worldwide; a single limit=100 call silently drops everything past
+// page one — which is where the English games tend to land.
+async function fetchAllForDate(d) {
+  let all = [], offset = 0;
+  for (let page = 0; page < 8; page++) {
+    const r = await api(`/matches?date=${d}&timezone=Europe/London&limit=100&offset=${offset}`);
+    const rows = r.data || [];
+    all = all.concat(rows);
+    if (rows.length < 100) break;
+    offset += 100;
+  }
+  return all;
 }
 
 // ── API ──
@@ -1030,8 +1067,7 @@ async function loadToday() {
   document.getElementById('liveContent').innerHTML =
     '<div class="state-box"><div class="spinner"></div><h3>Loading matches…</h3></div>';
   try {
-    const data = await api(`/matches?date=${todayStr()}&timezone=Europe/London&limit=100`);
-    todayMatches = data.data || [];
+    todayMatches = await fetchAllForDate(todayStr());
     window._todayMatches = todayMatches;
     document.getElementById('lastUpdated').textContent = new Date().toLocaleTimeString('en-GB');
     updateTicker();
@@ -1187,18 +1223,7 @@ async function loadDateRange() {
       // Paginate each day: busy Saturdays/Sundays exceed 100 fixtures
       // worldwide and limit=100 was silently truncating everything past page
       // one — which is exactly where the English matches were landing.
-      const fetchDay = async (d) => {
-        let all = [], offset = 0;
-        for (let page = 0; page < 8; page++) { // early-exit on partial page; 8x100 covers even opening-weekend Saturdays
-          const r = await api(`/matches?date=${d}&timezone=Europe/London&limit=100&offset=${offset}`);
-          const rows = r.data || [];
-          all = all.concat(rows);
-          if (rows.length < 100) break;
-          offset += 100;
-        }
-        return all;
-      };
-      const results = await Promise.allSettled(slice.map(fetchDay));
+      const results = await Promise.allSettled(slice.map(fetchAllForDate));
       results.forEach((r, j) => {
         if (r.status !== 'fulfilled') { failedDates.push(slice[j]); return; }
         r.value.forEach(m => {
@@ -1349,6 +1374,11 @@ const KNOWN_LEAGUES = {
   'League One':           { searches: ['League One', 'EFL League One'], country: ['england','eng','gb','uk'] },
   'League Two':           { searches: ['League Two', 'EFL League Two'], country: ['england','eng','gb','uk'] },
   'FA Cup':               { searches: ['FA Cup'], country: ['england','eng','gb','uk'] },
+  'National League':      { searches: ['National League', 'Vanarama National League'], country: ['england','eng'] },
+  'UEFA Europa League':   { searches: ['UEFA Europa League', 'Europa League'] },
+  'Scottish Premiership': { searches: ['Premiership', 'Scottish Premiership'], country: ['scotland','sco'] },
+  'Eredivisie':           { searches: ['Eredivisie'], country: ['netherlands','ned','nl'] },
+  'Primeira Liga':        { searches: ['Primeira Liga', 'Liga Portugal'], country: ['portugal','por','pt'] },
 };
 
 // Resolves a league name to its numeric ID using the same search+country-filter
@@ -1387,9 +1417,9 @@ async function resolveLeagueId(leagueName) {
 // Cache of resolved league IDs for the English competitions that collide with
 // same-named leagues elsewhere (Premier League, Championship, etc). Populated
 // once on page load — see the 'load' listener below.
-const ENGLISH_LEAGUE_IDS = { premierLeague: null, championship: null, leagueOne: null, leagueTwo: null, faCup: null };
+const ENGLISH_LEAGUE_IDS = { premierLeague: null, championship: null, leagueOne: null, leagueTwo: null, nationalLeague: null, faCup: null };
 
-const LEAGUE_ID_CACHE_KEY = 'bazza_hl_league_ids_v2'; // v1 retired: could contain a mislearned non-English ID
+const LEAGUE_ID_CACHE_KEY = 'bazza_hl_league_ids_v3'; // v3: adds National League; v2 may hold stale IDs
 
 async function loadEnglishLeagueIds() {
   // League IDs never change, so cache them: boot becomes instant and a
@@ -1405,7 +1435,8 @@ async function loadEnglishLeagueIds() {
   const resolveAll = async () => {
     // Sequential, not a 10-search burst — kinder to the rate limit at boot
     const names = [['premierLeague','Premier League'],['championship','Championship'],
-                   ['leagueOne','League One'],['leagueTwo','League Two'],['faCup','FA Cup']];
+                   ['leagueOne','League One'],['leagueTwo','League Two'],
+                   ['nationalLeague','National League'],['faCup','FA Cup']];
     let changed = false;
     for (const [slot, name] of names) {
       const id = await resolveLeagueId(name);
@@ -1424,9 +1455,19 @@ async function loadEnglishLeagueIds() {
   await resolveAll();
 }
 
-async function loadStandings(leagueName, btn, forceSeason) {
+// Marks the chosen pill (or the foreign-league dropdown) active and resets the rest
+function setStandingsNav(el) {
   document.querySelectorAll('#standFilters .fpill').forEach(p => p.classList.remove('active'));
-  if (btn) btn.classList.add('active');
+  const sel = document.getElementById('foreignLeagueSelect');
+  if (sel) {
+    if (el === sel) sel.classList.add('active');
+    else { sel.classList.remove('active'); sel.value = ''; }
+  }
+  if (el && el !== sel) el.classList.add('active');
+}
+
+async function loadStandings(leagueName, btn, forceSeason) {
+  setStandingsNav(btn);
   document.getElementById('standingsContent').innerHTML =
     '<div class="state-box"><div class="spinner"></div><h3>Loading standings…</h3></div>';
   try {
@@ -1617,8 +1658,7 @@ async function fetchFinalTable(leagueName) {
 }
 
 async function loadLastSeasonRecap(btn) {
-  document.querySelectorAll('#standFilters .fpill').forEach(p => p.classList.remove('active'));
-  if (btn) btn.classList.add('active');
+  setStandingsNav(btn);
   const el = document.getElementById('standingsContent');
   el.innerHTML = '<div class="state-box"><div class="spinner"></div><h3>Loading last season\u2019s final tables…</h3></div>';
   try {
@@ -1646,57 +1686,6 @@ async function loadLastSeasonRecap(btn) {
   }
 }
 
-// ── SEASON COUNTDOWN ──
-// Pure client-side date maths — no API calls, so it can never break the way
-// the old round-label-dependent bracket did. Premier League 2026/27 kicks
-// off Friday 21 August 2026 (confirmed via Premier League's own announcement).
-const SEASON_START = new Date('2026-08-21T00:00:00+01:00');
-
-function loadSeasonCountdown(btn) {
-  document.querySelectorAll('#standFilters .fpill').forEach(p => p.classList.remove('active'));
-  if (btn) btn.classList.add('active');
-  const el = document.getElementById('standingsContent');
-
-  function render() {
-    const now = new Date();
-    const diff = SEASON_START - now;
-    if (diff <= 0) {
-      el.innerHTML = `<div class="state-box"><div class="ico">⚽</div><h3>The season's here!</h3><p>Check Fixtures for today's action.</p></div>`;
-      return;
-    }
-    const days = Math.floor(diff / 86400000);
-    const hours = Math.floor((diff % 86400000) / 3600000);
-    const mins = Math.floor((diff % 3600000) / 60000);
-    const secs = Math.floor((diff % 60000) / 1000);
-    el.innerHTML = `
-      <div class="sec-head"><h2>⚽ Season Countdown</h2><div class="sec-line"></div></div>
-      <div id="countdownBox" style="text-align:center;padding:30px 16px;background:var(--card);border:1px solid var(--border);border-radius:12px;">
-        <div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:14px;">Premier League 2026/27 kicks off</div>
-        <div style="display:flex;justify-content:center;gap:18px;font-family:'JetBrains Mono',monospace;">
-          <div><div style="font-size:2.2rem;font-weight:700;color:var(--wc-gold);">${days}</div><div style="font-size:0.6rem;color:var(--text-muted);letter-spacing:1px;">DAYS</div></div>
-          <div><div style="font-size:2.2rem;font-weight:700;">${String(hours).padStart(2,'0')}</div><div style="font-size:0.6rem;color:var(--text-muted);letter-spacing:1px;">HRS</div></div>
-          <div><div style="font-size:2.2rem;font-weight:700;">${String(mins).padStart(2,'0')}</div><div style="font-size:0.6rem;color:var(--text-muted);letter-spacing:1px;">MIN</div></div>
-          <div><div style="font-size:2.2rem;font-weight:700;">${String(secs).padStart(2,'0')}</div><div style="font-size:0.6rem;color:var(--text-muted);letter-spacing:1px;">SEC</div></div>
-        </div>
-        <div style="margin-top:18px;font-size:0.72rem;color:var(--text-muted);">Friday 21 August 2026</div>
-        <div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border);font-size:0.75rem;color:var(--text-mid);">
-          🔴 Manchester United open away at <strong style="color:var(--text);">Hull City</strong> — Saturday 22 August
-        </div>
-      </div>`;
-  }
-  render();
-  clearInterval(window._countdownTimer);
-  window._countdownTimer = setInterval(() => {
-    // Stop once the countdown box is no longer in the DOM (user navigated
-    // to a different Standings sub-tab, or away from Standings entirely)
-    if (!document.getElementById('countdownBox')) {
-      clearInterval(window._countdownTimer);
-      return;
-    }
-    render();
-  }, 1000);
-}
-
 // ── MODAL ──
 async function openModal(id) {
   document.getElementById('modalBg').classList.add('open');
@@ -1713,6 +1702,9 @@ async function openModal(id) {
       return cached?.state?.description || '';
     })();
     const LIVE_CHECK = ['First half','Second half','Half time','Extra time','Break time','Penalties'];
+    // Skip the box-score hit for games that haven't kicked off — nothing to show
+    const cachedAny = [...(window._todayMatches||[]), ...(allDateMatches||[])].find(x=>x.id==id);
+    const knownNotStarted = cachedAny?.state?.description === 'Not started';
     const isLiveNow = LIVE_CHECK.includes(m_state);
 
     const [matchData, eventsData, statsData, lineupsData, highlightsData, boxScoreData] = await Promise.allSettled([
@@ -1721,7 +1713,7 @@ async function openModal(id) {
       api(`/statistics/${id}`),
       api(`/lineups/${id}`),
       api(`/highlights?matchId=${id}&limit=6`),
-      api(`/matches/box-score/${id}`)
+      knownNotStarted ? Promise.resolve(null) : api(`/box-score/${id}`)
     ]);
 
     const raw = matchData.status === 'fulfilled' ? matchData.value : null;
@@ -1972,53 +1964,55 @@ async function openModal(id) {
       html += `</div>`;
     }
 
-    // Box Score — Highlightly returns different shapes for club vs international
-    // Shape A (club): array of {team:{name}, players:[...]}
-    // Shape B (international/World Cup): {homeTeam:{players:[...]}, awayTeam:{players:[...]}}
-    // Shape C: {data: [...]} wrapper
+    // Box Score — documented shape (GET /box-score/{matchId}):
+    // [{ team:{id,name,logo}, players:[{ name, shirtNumber, position, matchRating,
+    //    minutesPlayed, isCaptain, isSubstitute, statistics:[{ goalsScored, assists,
+    //    shotsTotal, shotsOnTarget, passesKey, expectedGoals?, ... }] }] }]
+    // Note statistics is an ARRAY of one object, and the rating is matchRating
+    // on the player — the old code read p.statistics.goals / s.rating, so even
+    // when data arrived every cell came out as a dash.
     const bsRaw = boxScoreData.status === 'fulfilled' ? boxScoreData.value : null;
-    let bsData = [];
-    if (bsRaw) {
-      if (Array.isArray(bsRaw)) {
-        bsData = bsRaw;
-      } else if (Array.isArray(bsRaw?.data)) {
-        bsData = bsRaw.data;
-      } else if (bsRaw?.homeTeam || bsRaw?.awayTeam) {
-        ['homeTeam','awayTeam'].forEach(side => {
-          if (bsRaw[side]) {
-            const t = bsRaw[side];
-            bsData.push({ team: { name: t.name || t.team?.name || side }, players: t.players || t.lineup || [] });
-          }
-        });
-      }
-    }
-    const bsTeams = bsData.filter(t => (t.players||[]).length > 0);
+    const bsData = Array.isArray(bsRaw) ? bsRaw : (Array.isArray(bsRaw?.data) ? bsRaw.data : []);
+    const bsTeams = bsData.filter(t => (t.players||[]).some(p => (p.minutesPlayed||0) > 0));
     if (bsTeams.length) {
+      const POS = { Goalkeeper:'GK', Defender:'DEF', Midfielder:'MID', Forward:'FWD' };
+      const statOf = p => (Array.isArray(p.statistics) ? p.statistics[0] : p.statistics) || {};
+      const anyXg = bsTeams.some(t => t.players.some(p => statOf(p).expectedGoals != null));
       html += `<div class="bs-section"><div class="ev-title">📊 Box Score</div>`;
       bsTeams.forEach(team => {
-        const tName = team.team?.name || team.name || '—';
-        const players = team.players || [];
-        html += `<div class="bs-team-block"><div class="bs-team-name">${tName}</div>`;
-        html += `<table class="bs-table"><thead><tr>
-          <th>Player</th><th>Pos</th><th>Mins</th><th>G</th><th>A</th><th>Shots</th><th>Rating</th>
+        const players = team.players
+          .filter(p => (p.minutesPlayed||0) > 0)
+          .sort((x,y) => (x.isSubstitute - y.isSubstitute) || ((y.minutesPlayed||0) - (x.minutesPlayed||0)));
+        html += `<div class="bs-team-block"><div class="bs-team-name">${team.team?.name || '—'}</div>
+        <div class="bs-scroll"><table class="bs-table"><thead><tr>
+          <th>Player</th><th>Mins</th><th>G</th><th>A</th><th>Sh</th><th>SoT</th><th>KP</th>${anyXg?'<th>xG</th>':''}<th>Rtg</th>
         </tr></thead><tbody>`;
         players.forEach(p => {
-          const s = p.statistics || p.stats || p;
-          const rating = s.rating ? parseFloat(s.rating).toFixed(1) : '—';
-          const ratingCls = s.rating >= 7.5 ? 'hi' : s.rating < 6 ? 'red' : '';
-          html += `<tr>
-            <td><span class="bs-player-name">${p.player?.name||p.name||'—'}</span></td>
-            <td><span class="bs-player-pos">${p.position||p.pos||'—'}</span></td>
-            <td><span class="bs-num">${s.minutesPlayed??s.minutes??'—'}</span></td>
-            <td><span class="bs-num green">${s.goals??'—'}</span></td>
-            <td><span class="bs-num">${s.assists??'—'}</span></td>
-            <td><span class="bs-num">${s.shotsTotal??s.shots??'—'}</span></td>
-            <td><span class="bs-num ${ratingCls}">${rating}</span></td>
+          const st = statOf(p);
+          const r = parseFloat(p.matchRating);
+          const rating = isNaN(r) ? '—' : r.toFixed(1);
+          const rCls = isNaN(r) ? '' : r >= 7.5 ? 'hi' : r < 6 ? 'red' : '';
+          const num = p.shirtNumber != null ? `<span style="color:var(--text-muted);font-size:0.6rem;margin-right:4px;">${p.shirtNumber}</span>` : '';
+          const cap = p.isCaptain ? ' <span style="color:var(--amber);font-size:0.58rem;">(C)</span>' : '';
+          const sub = p.isSubstitute ? ' <span style="font-size:0.58rem;color:var(--text-muted);">↑</span>' : '';
+          const card = st.cardsRed ? ' 🟥' : (st.cardsSecondYellow ? ' 🟨🟨' : (st.cardsYellow ? ' 🟨' : ''));
+          const g = st.goalsScored ?? 0, a = st.assists ?? 0;
+          html += `<tr class="${p.isSubstitute?'bs-sub':''}">
+            <td>${num}<span class="bs-player-name">${p.name||'—'}</span>${cap}${sub}${card}
+              <span class="bs-player-pos"> ${POS[p.position]||''}</span></td>
+            <td><span class="bs-num">${p.minutesPlayed ?? '—'}</span></td>
+            <td><span class="bs-num ${g?'green':''}">${g}</span></td>
+            <td><span class="bs-num">${a}</span></td>
+            <td><span class="bs-num">${st.shotsTotal ?? '—'}</span></td>
+            <td><span class="bs-num">${st.shotsOnTarget ?? '—'}</span></td>
+            <td><span class="bs-num">${st.passesKey ?? '—'}</span></td>
+            ${anyXg ? `<td><span class="bs-num">${st.expectedGoals != null ? Number(st.expectedGoals).toFixed(2) : '—'}</span></td>` : ''}
+            <td><span class="bs-num ${rCls}">${rating}</span></td>
           </tr>`;
         });
-        html += `</tbody></table></div>`;
+        html += `</tbody></table></div></div>`;
       });
-      html += `</div>`;
+      html += `<div style="font-size:0.6rem;color:var(--text-muted);margin-top:-4px;">Sh shots · SoT on target · KP key passes · ↑ came off the bench</div></div>`;
     }
     // If box score empty (common for international tournaments) — silently skip, modal has plenty of other data
 
@@ -2129,28 +2123,35 @@ function isWorldCup(m) {
 // for every future session. The Malta/Belarus "Premier League" collision is
 // handled by the country check.
 const ENGLISH_NAME_SLOTS = [
-  [/^premier league$/,           'premierLeague'],
-  [/^(efl )?championship$/,      'championship'],
-  [/^(efl )?league one$/,        'leagueOne'],
-  [/^(efl )?league two$/,        'leagueTwo'],
-  [/^fa cup$/,                   'faCup'],
+  [/^premier league$/,                         'premierLeague'],
+  [/^(efl |sky bet )?championship$/,           'championship'],
+  [/^(efl |sky bet )?league one$/,             'leagueOne'],
+  [/^(efl |sky bet )?league two$/,             'leagueTwo'],
+  [/^(vanarama )?national league$/,            'nationalLeague'],
+  [/^(the )?fa cup$/,                          'faCup'],
+  [/^(efl cup|league cup|carabao cup)$/,       null],
+  [/^(fa )?community shield$/,                 null],
+  [/^(efl trophy|football league trophy)$/,    null],
 ];
+// Highlightly puts the country on the MATCH (m.country), not on m.league —
+// the old code read m.league.country, which never exists, so the name
+// fallback could never fire and the England filter depended entirely on
+// the cached league IDs. Deliberately no bare 'gb'/'uk': Scotland also has
+// a Championship, League One and League Two.
+function matchCountry(m) {
+  const c = m.country || m.league?.country || {};
+  return ((c.code||'') + ' ' + (c.name||'')).toLowerCase().trim();
+}
 function isEnglishLeague(m) {
   const leagueId = m.league?.id;
   if (leagueId != null && Object.values(ENGLISH_LEAGUE_IDS).includes(leagueId)) return true;
   const name = (m.league?.name||'').toLowerCase().trim();
-  const slot = ENGLISH_NAME_SLOTS.find(([rx]) => rx.test(name))?.[1];
-  if (!slot) return false;
-  const country = ((m.league?.country?.code||'') + ' ' + (m.league?.country?.name||'')).toLowerCase().trim();
-  // Highlightly match objects carry no league country data, so a bare name
-  // match proves nothing — Malta, Wales and NI all field a "Premier League".
-  // The name fallback therefore only counts WITH confirming country data;
-  // otherwise the resolved league IDs (from /leagues, which does have
-  // country info) are the sole authority. Learning likewise requires country
-  // confirmation — an earlier version taught itself Malta's ID here.
-  if (!country) return false;
-  if (!/\b(england|eng|gb|uk|great britain|united kingdom)\b/.test(country)) return false;
-  if (leagueId != null && ENGLISH_LEAGUE_IDS[slot] == null) {
+  const hit = ENGLISH_NAME_SLOTS.find(([rx]) => rx.test(name));
+  if (!hit) return false;
+  const country = matchCountry(m);
+  if (!/\b(england|eng)\b|gb-eng/.test(country)) return false;
+  const slot = hit[1];
+  if (slot && leagueId != null && ENGLISH_LEAGUE_IDS[slot] == null) {
     ENGLISH_LEAGUE_IDS[slot] = leagueId;
     try { localStorage.setItem(LEAGUE_ID_CACHE_KEY, JSON.stringify(ENGLISH_LEAGUE_IDS)); } catch(e){}
   }
@@ -2166,7 +2167,7 @@ function isEngland(m) {
 }
 
 function setLiveFilter(el, val) {
-  document.querySelectorAll('.filter-row .fpill').forEach(p => p.classList.remove('active'));
+  el.closest('.filter-row').querySelectorAll('.fpill').forEach(p => p.classList.remove('active'));
   el.classList.add('active'); liveFilter = val; renderLive();
 }
 function setFixFilter(el, val) {
