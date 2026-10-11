@@ -810,7 +810,7 @@ footer {
       <div class="logo-icon">⚽</div>
       <div class="logo-text">
         <h1>Bazza's Football Oracle</h1>
-        <p>Powered by Highlightly · v1.0</p>
+        <p>Powered by Highlightly · v1.2</p>
       </div>
     </div>
     <div class="header-right">
@@ -900,6 +900,8 @@ footer {
       <button class="fpill eng-pill" onclick="loadStandings('League One',this)">League One</button>
       <button class="fpill eng-pill" onclick="loadStandings('League Two',this)">League Two</button>
       <button class="fpill eng-pill" onclick="loadStandings('National League',this)">National League</button>
+      <button class="fpill eng-pill" onclick="loadStandings('WSL',this)">WSL</button>
+      <button class="fpill eng-pill" onclick="loadStandings('WSL 2',this)">WSL 2</button>
       <select class="league-select" id="foreignLeagueSelect" onchange="if(this.value){loadStandings(this.value,this)}">
         <option value="">🌍 Other leagues…</option>
         <option value="UEFA Champions League">⭐ Champions League</option>
@@ -962,7 +964,7 @@ footer {
         Tap any match card for full details including goals, cards, subs and statistics.
       </p>
       <div style="margin-top:10px;font-size:0.67rem;color:rgba(255,180,0,0.3);">
-        v1.1 · Highlightly PRO · Part of the Bazza Ecosystem · bazzameps.github.io
+        v1.2 · Highlightly PRO · Part of the Bazza Ecosystem · bazzameps.github.io
       </div>
     </div>
   </div>
@@ -984,7 +986,7 @@ footer {
   </div>
 </div>
 
-<footer>⚽ Bazza's Football Oracle v1.1 · Data via Highlightly · Part of the Bazza Ecosystem</footer>
+<footer>⚽ Bazza's Football Oracle v1.2 · Data via Highlightly · Part of the Bazza Ecosystem</footer>
 
 <script>
 // ── CONFIG ──
@@ -1375,6 +1377,8 @@ const KNOWN_LEAGUES = {
   'League Two':           { searches: ['League Two', 'EFL League Two'], country: ['england','eng','gb','uk'] },
   'FA Cup':               { searches: ['FA Cup'], country: ['england','eng','gb','uk'] },
   'National League':      { searches: ['National League', 'Vanarama National League'], country: ['england','eng'] },
+  'WSL':                  { searches: ["Women's Super League", 'FA WSL', 'WSL', "FA Women's Super League"], country: ['england','eng'] },
+  'WSL 2':                { searches: ['WSL 2', "Women's Championship", "FA Women's Championship", "Women's Super League 2"], country: ['england','eng'] },
   'UEFA Europa League':   { searches: ['UEFA Europa League', 'Europa League'] },
   'Scottish Premiership': { searches: ['Premiership', 'Scottish Premiership'], country: ['scotland','sco'] },
   'Eredivisie':           { searches: ['Eredivisie'], country: ['netherlands','ned','nl'] },
@@ -1387,6 +1391,14 @@ const KNOWN_LEAGUES = {
 // several countries also literally name their top flight "Premier League").
 // League IDs are unique per competition even when names collide, so matching
 // by ID rather than name string sidesteps the collision problem entirely.
+// When a search returns several leagues, keep the exact name matches if any —
+// stops 'Championship' resolving to 'Women's Championship' (and vice versa)
+const normName = x => (x||'').toLowerCase().replace(/[\u2018\u2019]/g,"'").trim();
+function preferExactName(leagues, term) {
+  const exact = leagues.filter(l => normName(l.name) === normName(term));
+  return exact.length ? exact : leagues;
+}
+
 async function resolveLeagueId(leagueName) {
   const cfg = KNOWN_LEAGUES[leagueName] || { searches: [leagueName] };
   for (const term of cfg.searches) {
@@ -1401,6 +1413,7 @@ async function resolveLeagueId(leagueName) {
         });
         if (filtered.length) leagues = filtered;
       }
+      leagues = preferExactName(leagues, term);
       const sorted = leagues.sort((a,b) => {
         const aSeasons = a.seasons?.map(s=>s.season)||[];
         const bSeasons = b.seasons?.map(s=>s.season)||[];
@@ -1417,9 +1430,9 @@ async function resolveLeagueId(leagueName) {
 // Cache of resolved league IDs for the English competitions that collide with
 // same-named leagues elsewhere (Premier League, Championship, etc). Populated
 // once on page load — see the 'load' listener below.
-const ENGLISH_LEAGUE_IDS = { premierLeague: null, championship: null, leagueOne: null, leagueTwo: null, nationalLeague: null, faCup: null };
+const ENGLISH_LEAGUE_IDS = { premierLeague: null, championship: null, leagueOne: null, leagueTwo: null, nationalLeague: null, faCup: null, wsl: null, wsl2: null };
 
-const LEAGUE_ID_CACHE_KEY = 'bazza_hl_league_ids_v3'; // v3: adds National League; v2 may hold stale IDs
+const LEAGUE_ID_CACHE_KEY = 'bazza_hl_league_ids_v4'; // v4: adds WSL/WSL 2 + exact-name resolution
 
 async function loadEnglishLeagueIds() {
   // League IDs never change, so cache them: boot becomes instant and a
@@ -1436,7 +1449,8 @@ async function loadEnglishLeagueIds() {
     // Sequential, not a 10-search burst — kinder to the rate limit at boot
     const names = [['premierLeague','Premier League'],['championship','Championship'],
                    ['leagueOne','League One'],['leagueTwo','League Two'],
-                   ['nationalLeague','National League'],['faCup','FA Cup']];
+                   ['nationalLeague','National League'],['faCup','FA Cup'],
+                   ['wsl','WSL'],['wsl2','WSL 2']];
     let changed = false;
     for (const [slot, name] of names) {
       const id = await resolveLeagueId(name);
@@ -1490,6 +1504,7 @@ async function loadStandings(leagueName, btn, forceSeason) {
           });
           if (filtered.length) leagues = filtered;
         }
+        leagues = preferExactName(leagues, term);
         // Prefer league with 2026 season, then most recent
         const sorted = leagues.sort((a,b) => {
           const aSeasons = a.seasons?.map(s=>s.season)||[];
@@ -1645,6 +1660,7 @@ async function fetchFinalTable(leagueName) {
         });
         if (filtered.length) leagues = filtered;
       }
+      leagues = preferExactName(leagues, term);
       lg = leagues[0];
       break;
     }
@@ -2132,6 +2148,9 @@ const ENGLISH_NAME_SLOTS = [
   [/^(efl cup|league cup|carabao cup)$/,       null],
   [/^(fa )?community shield$/,                 null],
   [/^(efl trophy|football league trophy)$/,    null],
+  [/^(fa |barclays )?(women's super league|wsl)( 1)?$/,                      'wsl'],
+  [/^(fa |barclays )?(women's championship|wsl ?2|women's super league 2)$/, 'wsl2'],
+  [/^(fa )?women's (league cup|fa cup|continental tyres league cup)$|^(women's )?subway cup$/, null],
 ];
 // Highlightly puts the country on the MATCH (m.country), not on m.league —
 // the old code read m.league.country, which never exists, so the name
@@ -2145,7 +2164,7 @@ function matchCountry(m) {
 function isEnglishLeague(m) {
   const leagueId = m.league?.id;
   if (leagueId != null && Object.values(ENGLISH_LEAGUE_IDS).includes(leagueId)) return true;
-  const name = (m.league?.name||'').toLowerCase().trim();
+  const name = normName(m.league?.name);
   const hit = ENGLISH_NAME_SLOTS.find(([rx]) => rx.test(name));
   if (!hit) return false;
   const country = matchCountry(m);
