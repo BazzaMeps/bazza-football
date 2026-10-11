@@ -810,7 +810,7 @@ footer {
       <div class="logo-icon">⚽</div>
       <div class="logo-text">
         <h1>Bazza's Football Oracle</h1>
-        <p>Powered by Highlightly · v1.2</p>
+        <p>Powered by Highlightly · v1.3</p>
       </div>
     </div>
     <div class="header-right">
@@ -964,7 +964,7 @@ footer {
         Tap any match card for full details including goals, cards, subs and statistics.
       </p>
       <div style="margin-top:10px;font-size:0.67rem;color:rgba(255,180,0,0.3);">
-        v1.2 · Highlightly PRO · Part of the Bazza Ecosystem · bazzameps.github.io
+        v1.3 · Highlightly PRO · Part of the Bazza Ecosystem · bazzameps.github.io
       </div>
     </div>
   </div>
@@ -986,7 +986,7 @@ footer {
   </div>
 </div>
 
-<footer>⚽ Bazza's Football Oracle v1.2 · Data via Highlightly · Part of the Bazza Ecosystem</footer>
+<footer>⚽ Bazza's Football Oracle v1.3 · Data via Highlightly · Part of the Bazza Ecosystem</footer>
 
 <script>
 // ── CONFIG ──
@@ -2150,8 +2150,12 @@ const ENGLISH_NAME_SLOTS = [
   [/^(efl trophy|football league trophy)$/,    null],
   [/^(fa |barclays )?(women's super league|wsl)( 1)?$/,                      'wsl'],
   [/^(fa |barclays )?(women's championship|wsl ?2|women's super league 2)$/, 'wsl2'],
-  [/^(fa )?women's (league cup|fa cup|continental tyres league cup)$|^(women's )?subway cup$/, null],
+  [/^(fa )?women's (league cup|fa cup|continental tyres league cup)$|^(women's )?subway (players )?cup$|^wsl cup$/, null],
 ];
+// Names that only exist in England — accepted even if a match arrives with
+// no country attached (some women's fixtures do). A country that ISN'T
+// England still rejects them.
+const ENGLAND_ONLY_NAMES = /^(fa |barclays )?(women's super league|wsl ?2?|women's super league 2)$|^fa women's championship$|^wsl cup$|^(fa )?women's (league cup|fa cup)$|^(the )?fa cup$/;
 // Highlightly puts the country on the MATCH (m.country), not on m.league —
 // the old code read m.league.country, which never exists, so the name
 // fallback could never fire and the England filter depended entirely on
@@ -2168,7 +2172,8 @@ function isEnglishLeague(m) {
   const hit = ENGLISH_NAME_SLOTS.find(([rx]) => rx.test(name));
   if (!hit) return false;
   const country = matchCountry(m);
-  if (!/\b(england|eng)\b|gb-eng/.test(country)) return false;
+  const isEng = /\b(england|eng)\b|gb-eng/.test(country);
+  if (!isEng && !(country === '' && ENGLAND_ONLY_NAMES.test(name))) return false;
   const slot = hit[1];
   if (slot && leagueId != null && ENGLISH_LEAGUE_IDS[slot] == null) {
     ENGLISH_LEAGUE_IDS[slot] = leagueId;
@@ -2242,39 +2247,43 @@ async function loadFormForTeam(teamId, teamName, el) {
     const statsResult = await api(`/teams/statistics/${teamId}?fromDate=${statsFromDateStr}&timezone=Europe/London`).catch(()=>[]);
     window._lastTeamStats = Array.isArray(statsResult) ? statsResult : (statsResult.data || []);
 
-    // Fetch last 5 finished games for this team — scan back up to 90 days in batches
-    // until we have 5 finished games, regardless of how long ago they were played
+    // Ask for this team's matches directly by team ID, rather than scanning
+    // 30-90 date pages of limit=100. The old scan fired 30 requests at once
+    // (rate-limit casualties) and only read page one of each day — busy
+    // weekends have 500+ matches worldwide, so Saturday/Sunday games silently
+    // vanished and the form guide fell weeks behind. 2-4 calls instead.
     const DONE_STATES_FORM = ['Finished','Finished after penalties','Finished after extra time'];
-    let games = [];
-    const formToday = new Date();
-    // Fetch in 3 batches of 30 days — stops as soon as we have 5 games
-    const BATCH_SIZE = 30;
-    const MAX_BATCHES = 3; // covers 90 days total
-    for (let batch = 0; batch < MAX_BATCHES && games.length < 5; batch++) {
-      const datesToFetch = [];
-      for (let i = 0; i < BATCH_SIZE; i++) {
-        const dayOffset = batch * BATCH_SIZE + i;
-        const d = new Date(formToday); d.setDate(formToday.getDate() - dayOffset);
-        datesToFetch.push(d.toISOString().split('T')[0]);
+    const fetchSide = async (param, season) => {
+      let out = [], offset = 0;
+      for (let page = 0; page < 4; page++) {
+        const r = await api(`/matches?${param}=${teamId}&season=${season}&timezone=Europe/London&limit=100&offset=${offset}`);
+        const rows = r.data || [];
+        out = out.concat(rows);
+        if (rows.length < 100) break;
+        offset += 100;
       }
-      const results = await Promise.allSettled(
-        datesToFetch.map(dt => api(`/matches?date=${dt}&timezone=Europe/London&limit=100`))
-      );
-      const seen = new Set(games.map(g => g.id));
-      results.forEach(r => {
-        if (r.status === 'fulfilled') {
-          (r.value.data || []).forEach(m => {
-            if (seen.has(m.id)) return;
-            seen.add(m.id);
-            const hId = m.homeTeam?.id, aId = m.awayTeam?.id;
-            if ((hId === teamId || aId === teamId) && DONE_STATES_FORM.includes(m.state?.description)) {
-              games.push(m);
-            }
-          });
-        }
-      });
+      return out;
+    };
+    let games = [];
+    const seen = new Set();
+    const addGames = rows => rows.forEach(m => {
+      if (seen.has(m.id)) return;
+      seen.add(m.id);
+      if (DONE_STATES_FORM.includes(m.state?.description)) games.push(m);
+    });
+    const yr = new Date().getFullYear();
+    for (const season of [yr, yr - 1]) {   // 2026 = 2026/27; falls back a season early on
+      const res = await Promise.allSettled([fetchSide('homeTeamId', season), fetchSide('awayTeamId', season)]);
+      res.forEach(r => { if (r.status === 'fulfilled') addGames(r.value); });
+      if (games.length >= 5) break;
     }
-    // Sort most recent first, take last 5
+    if (!games.length) {
+      // Last resort: Highlightly's own last-five-games endpoint
+      try {
+        const lf = await api(`/last-five-games?teamId=${teamId}`);
+        addGames(Array.isArray(lf) ? lf : (lf.data || []));
+      } catch(e) {}
+    }
     games.sort((a,b) => new Date(b.date) - new Date(a.date));
     games = games.slice(0, 5);
     if (!games.length) {
